@@ -1,12 +1,13 @@
 ---
-description: Start an iterative CI fix session - investigate failures, apply fixes, and track progress until green
+name: babysit-pr-gusto
+description: Iterative CI babysitting loop for Gusto PRs — investigate Buildkite failures, apply fixes, verify locally, push, monitor, and repeat until green.
 ---
 
-# Fix CI Failures
+# Babysit PR (Gusto)
 
 Start an iterative CI debugging session. Systematically investigate and fix CI failures through a structured loop: investigate → fix → verify locally → push → check → iterate.
 
-This command orchestrates the debugging loop. For all Buildkite interaction (fetching builds, reading logs, monitoring), use the `investigating-builds` skill workflows and tool hierarchy.
+This command orchestrates the debugging loop. For all Buildkite interaction (fetching builds, reading logs, monitoring), use the [investigating-builds](investigating-builds/SKILL.md) skill workflows and tool hierarchy.
 
 ## Arguments
 
@@ -17,7 +18,7 @@ This command orchestrates the debugging loop. For all Buildkite interaction (fet
 
 ### If URL provided:
 
-Use the `investigating-builds` skill's "Investigating a Build from URL" workflow — `bktide snapshot` parses any Buildkite URL automatically.
+Use the [investigating-builds](investigating-builds/SKILL.md) skill's "Investigating a Build from URL" workflow — `bktide snapshot` parses any Buildkite URL automatically.
 
 ### If no URL provided:
 
@@ -30,7 +31,7 @@ Use the `investigating-builds` skill's "Investigating a Build from URL" workflow
    - Repository name often matches pipeline slug
    - Check `.buildkite/pipeline.yml` for pipeline hints
 
-3. Use the skill's "Checking Current Branch/PR Status" workflow to find the latest build for this branch.
+3. Use the [investigating-builds](investigating-builds/SKILL.md) skill's "Checking Current Branch/PR Status" workflow to find the latest build for this branch.
 
 4. If no pipeline can be determined, ask the user for the Buildkite URL.
 
@@ -119,7 +120,7 @@ If yes, create `docs/plans/ci-fix-<branch-slug>.md`:
 
 ## Step 4: Investigate Failures
 
-Use the `investigating-builds` skill to investigate. The skill's tool hierarchy applies: `bktide snapshot` first, then other bktide commands, then MCP tools as fallback.
+Use the [investigating-builds](investigating-builds/SKILL.md) skill to investigate. The skill's tool hierarchy applies: `bktide snapshot` first, then other bktide commands, then MCP tools as fallback.
 
 After gathering build data, identify failure patterns:
 - Test failures (RSpec, Jest, pytest, etc.)
@@ -185,7 +186,7 @@ After local verification passes:
    git push
    ```
 
-3. **Monitor the new build** using the `investigating-builds` skill's "Post-Push Monitoring" workflow.
+3. **Monitor the new build** using the [investigating-builds](investigating-builds/SKILL.md) skill's "Post-Push Monitoring" workflow.
 
 4. **Report status** when build completes:
    - If passed: Summarize what was fixed
