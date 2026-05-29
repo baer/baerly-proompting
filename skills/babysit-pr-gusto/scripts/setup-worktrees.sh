@@ -3,7 +3,7 @@
 #
 # Usage: setup-worktrees.sh 19475 19269 15826
 # Run from anywhere inside the target repo. Idempotent.
-# - Adds .worktrees/ to .gitignore (and commits) if not already ignored.
+# - Stages .worktrees/ in .gitignore if not already ignored (does NOT commit).
 # - Skips a branch that's currently checked out in the main working dir
 #   (git forbids two checkouts of one branch) and tells the user to switch to main.
 # - Runs `yarn install` in each new worktree.
@@ -12,21 +12,27 @@ set -euo pipefail
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
+# git check-ignore reads the working-tree .gitignore, so staging (not committing)
+# is enough to keep worktrees ignored. Committing is left to the operator so this
+# never lands an unrelated change on a feature branch.
 if ! git check-ignore -q .worktrees 2>/dev/null; then
   printf '\n.worktrees/\n' >> .gitignore
   git add .gitignore
-  git commit -m "chore: ignore .worktrees" >/dev/null
-  echo "ignored: .worktrees/"
+  echo "staged: .gitignore (.worktrees/ added) — commit on main when convenient."
 fi
 
 git fetch origin >/dev/null 2>&1 || true
 current=$(git branch --show-current)
 
 for pr in "$@"; do
-  branch=$(gh pr view "$pr" --json headRefName --jq .headRefName)
+  branch=$(gh pr view "$pr" --json headRefName --jq .headRefName 2>/dev/null || true)
+  if [ -z "$branch" ]; then
+    echo "skipped: PR #$pr not found or closed"
+    continue
+  fi
   path=".worktrees/$branch"
 
-  if git worktree list --porcelain | grep -qx "worktree $root/$path"; then
+  if git worktree list --porcelain | grep -qxF "worktree $root/$path"; then
     echo "exists: $path (PR #$pr)"
     continue
   fi
@@ -37,7 +43,7 @@ for pr in "$@"; do
   fi
 
   git fetch origin "$branch" >/dev/null 2>&1 || true
-  git worktree add "$path" "$branch"
+  git worktree add -- "$path" "$branch"
   echo "created: $path (PR #$pr)"
   ( cd "$path" && yarn install --silent ) || echo "warn: yarn install failed in $path"
 done
