@@ -14,8 +14,9 @@ import fs from 'fs';
 import path from 'path';
 
 const ESCALATE_AFTER = 3;
+const RETRIGGER_CAP = 2;
 const BOOL_FIELDS = new Set(['escalated']);
-const NUM_FIELDS = new Set(['iterations', 'pr']);
+const NUM_FIELDS = new Set(['iterations', 'pr', 'strikes']);
 
 const [, , cmd, pr, ...rest] = process.argv;
 if (!cmd || !pr) {
@@ -45,6 +46,7 @@ function load() {
       branch: null,
       status: 'unknown',
       iterations: 0,
+      strikes: 0,
       lastBuild: null,
       escalated: false,
       attempts: [],
@@ -86,7 +88,17 @@ switch (cmd) {
     s.attempts.push({ build, outcome, note: note.join(' ') });
     s.iterations = s.attempts.length;
     s.lastBuild = build;
-    if (outcome !== 'green' && s.iterations >= ESCALATE_AFTER) s.escalated = true;
+    // Derive strikes from the full history (also migrates state files lacking it):
+    // forward progress (a green build or a fix we stand behind) resets the count;
+    // any non-progress outcome (paused, retriggered, …) adds a strike.
+    let strikes = 0;
+    for (const a of s.attempts) {
+      if (a.outcome === 'green' || a.outcome === 'pushed') strikes = 0;
+      else strikes += 1;
+    }
+    s.strikes = strikes;
+    const retriggers = s.attempts.filter(a => a.outcome === 'retriggered').length;
+    if (s.strikes >= ESCALATE_AFTER || retriggers >= RETRIGGER_CAP) s.escalated = true;
     save(s);
     break;
   }
