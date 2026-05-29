@@ -13,9 +13,14 @@ if [ "$#" -gt 0 ]; then
   exit 0
 fi
 
-gh pr list --author "@me" --state open \
+# A PR's statusCheckRollup mixes two shapes: commit-status checks expose `state`,
+# check-runs expose `conclusion`. Match a FAILURE in either. Guard against PRs
+# with no checks yet (statusCheckRollup can be null).
+gh pr list --author "@me" --state open --limit 200 \
   --json number,statusCheckRollup \
   --jq '.[]
+        | select(.statusCheckRollup != null)
         | select([.statusCheckRollup[]
             | select(.state=="FAILURE" or .conclusion=="FAILURE")] | length > 0)
-        | .number'
+        | .number' \
+  || { echo "resolve-prs: gh pr list failed" >&2; exit 1; }
