@@ -12,11 +12,16 @@ set -euo pipefail
 
 out="[]"
 for pr in "$@"; do
-  branch=$(gh pr view "$pr" --json headRefName --jq .headRefName)
+  branch=$(gh pr view "$pr" --json headRefName --jq .headRefName 2>/dev/null || true)  # exits non-zero for bad PR number, unlike pr checks below
+  if [ -z "$branch" ]; then
+    out=$(printf '%s' "$out" | jq -c --argjson pr "$pr" '. + [{pr:$pr, branch:null, state:"unknown", failedChecks:[]}]')
+    continue
+  fi
 
   # gh pr checks exits non-zero when checks are failing/pending — don't let set -e abort.
   checks=$(gh pr checks "$pr" --json name,bucket,link 2>/dev/null || true)
   [ -z "$checks" ] && checks="[]"
+  [ "$checks" = "null" ] && checks="[]"
 
   state=$(printf '%s' "$checks" | jq -r '
     if   any(.[]; .bucket=="fail")    then "failed"
