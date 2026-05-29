@@ -5,28 +5,35 @@ cadence until every PR is green or escalated.
 
 ## Cadence
 
-Match the interval to Buildkite build duration (~10 min for `buildkite/web`).
-Default **15 minutes**. Polling faster wastes ticks (the build won't have moved);
-much slower just adds latency to fixes.
+Match the interval to Buildkite build duration. In practice `buildkite/web` runs
+roughly **20–40 min** (a live run took well over 15). Default **20 minutes**
+(cron-friendly). Polling faster wastes ticks (the build won't have moved); much
+slower just adds latency to fixes.
 
 ## Mode A — in-session `/loop` (default, recommended first)
 
 ```
-/loop 15m babysit-pr-gusto 19475 19269 15826
+/loop 20m babysit-pr-gusto 19475 19269
 ```
 
-- Re-invokes the skill every 15 min while this session stays open.
+- The loop invocation is just the **interval + skill name + PR numbers** — nothing
+  more. The tick logic AND the stop rule live in the skill (`SKILL.md` "How this
+  skill runs" + `orchestration.md`), NOT in the loop prompt. Re-stating the tick
+  logic in the cron prompt only lets it drift from the skill; a bare invocation is
+  sufficient because the skill owns its own stop condition.
+- Re-invokes the skill every 20 min while this session stays open.
 - Each tick fans out fixers as background subagents, so the foreground chat is free.
 - Best when you're at your desk and want to interrupt easily.
-- Termination: the skill should stop scheduling once `triage` shows all PRs green
-  or escalated — emit a final summary and do not reschedule.
+- Termination (owned by the skill): once all watched PRs are green or escalated, the
+  skill emits a final summary and stops scheduling the next tick (`CronDelete` / no
+  re-wake). The loop prompt does not need to encode this.
 
 ## Mode B — remote `/schedule` (set-and-forget)
 
 Use when the loop should survive closing the laptop:
 
 ```
-/schedule a routine "babysit PRs 19475 19269 15826" every 15 minutes
+/schedule a routine "babysit PRs 19475 19269" every 20 minutes
 ```
 
 - Runs remotely on cron. Heavier; use after the loop has earned trust.
@@ -41,10 +48,16 @@ risks fixing a failure that the build itself will clear.
 
 ## Escalation & notification
 
-- After `ESCALATE_AFTER` (3) non-green attempts on a PR, `pr-state.mjs` sets
-  `escalated: true`. The orchestrator then skips it and surfaces it in every tick
-  report under "needs human."
-- A fixer that returns `paused` (couldn't verify a fix) also surfaces immediately —
-  do not keep spending CI cycles on a guess.
+- `pr-state.mjs` sets `escalated: true` when a PR accrues `ESCALATE_AFTER` (3)
+  _consecutive non-progress_ attempts (its `strikes` count — `pushed`/`green` reset
+  it; see state-schema.md) OR reaches `RETRIGGER_CAP` (2) `retriggered` attempts.
+- Escalated/held PRs are NOT silently dropped from the watch args. The default is
+  **kept in the list and reported every tick as "skipped — needs human"** (never
+  re-fixed). An operator may explicitly remove a PR from the args if they want it off
+  the watch list; that is the only way it leaves.
+- A fixer that returns `paused` (couldn't verify a fix, cross-team edit, dirty/stale
+  worktree) also surfaces immediately — do not keep spending CI cycles on a guess.
+- A fixer that returns `retriggered` re-kicked CI for a non-PR failure (flake / infra);
+  it counts toward the retrigger cap so a persistent "flake" eventually escalates.
 - The tick report is the notification surface. In `/schedule` mode, include a one-line
   summary suitable for a push notification: "babysit: 1 green, 1 running, 1 needs human."

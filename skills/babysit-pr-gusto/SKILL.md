@@ -32,8 +32,17 @@ For the tick algorithm and the per-PR single-iteration **fixer contract**, follo
 5. Fan out ONE fixer subagent per failing, non-escalated PR (parallel)
 6. Persist results (`scripts/pr-state.mjs attempt …`) and print the tick report
 7. If backgrounded and any PR is still failing/running and not escalated, the
-   cadence (Mode A/B in backgrounding.md) schedules the next tick. Stop when all
-   PRs are green or escalated, with a final summary.
+   cadence (Mode A/B in backgrounding.md) schedules the next tick.
+
+**Stop condition (owned by this skill, not the loop prompt).** A bare loop
+invocation (`/loop <interval> babysit-pr-gusto <prs…>`) is sufficient because this
+skill owns its own termination: when every watched PR is green or escalated, emit
+the final summary and STOP scheduling the next tick (`CronDelete` / no re-wake).
+Escalated/held PRs do NOT keep the loop alive — they stay in the watch list and are
+reported each tick as "skipped — needs human," but they are not re-fixed and do not
+count as "still failing." The tick logic and this stop rule live here and in
+`references/orchestration.md` + `references/backgrounding.md`, never duplicated in
+the loop prompt (which would only drift).
 
 ## Fixer sub-procedure (one PR, one iteration)
 
@@ -209,7 +218,8 @@ Iteration across builds is the orchestrator's job (one fix per tick), not the
 fixer's. Do not loop here waiting for a new build. Instead:
 
 - If you pushed a fix you can stand behind: `scripts/pr-state.mjs attempt <pr> <build> pushed "<one-line summary>"` and return `pushed`.
-- If you could not verify a fix locally (never push a guess): `scripts/pr-state.mjs attempt <pr> <build> paused "<hypothesis>"` and return `paused`.
+- If the failure was NOT caused by this PR — a flaky test that passes on rerun, or a CI infra flake (spot-instance termination, SIGTERM / exit 143, "agent lost", BROKEN cascade) — do NOT edit code. Retrigger CI with an empty commit (`git commit --allow-empty -m "ci: retrigger build (<reason>)"` then `git push`), record `scripts/pr-state.mjs attempt <pr> <build> retriggered "<reason>"`, and return `retriggered`. (Cap: `pr-state.mjs` auto-escalates after 2 retriggers — a 3rd "flake" recurrence is probably real and needs a human.)
+- If you could not verify a fix locally (never push a guess), or the fix touches another team's CODEOWNERS area, or the worktree is too stale to install/verify: **leave the worktree CLEAN** for the next tick — revert or stash your unverified edits (`git checkout -- .` or `git stash`) — then `scripts/pr-state.mjs attempt <pr> <build> paused "<hypothesis>"` and return `paused`.
 - The next tick re-triages and, if still failing and not escalated, dispatches a fresh fixer.
 
 ## Final summary (orchestrator, after all ticks)
@@ -328,7 +338,8 @@ git diff origin/main -- test/helpers/
 
 - **Every required-check failure is real until proven otherwise** — never report a PR as green or dismiss failures without running `gh pr checks` and verifying each failing check
 - **Always verify locally** before pushing — saves CI cycles
-- **Never push a guess** — every fix you push must be one you can explain with certainty, not a hypothesis. If you cannot reproduce the failure locally and cannot mechanically prove your change fixes it, **stop and ask the user**. Present your hypothesis clearly: what you think is wrong, what you'd change, and why you're not certain. Let the user decide whether to spend a CI cycle validating it. Pushing guesses wastes CI cycles (10+ minutes per build), pollutes git history, and erodes trust.
+- **Never push a guess** — every fix you push must be one you can explain with certainty, not a hypothesis. If you cannot reproduce the failure locally and cannot mechanically prove your change fixes it, **stop and ask the user**. Present your hypothesis clearly: what you think is wrong, what you'd change, and why you're not certain. Let the user decide whether to spend a CI cycle validating it. Pushing guesses wastes CI cycles (20+ minutes per build), pollutes git history, and erodes trust.
+- **Don't auto-push across CODEOWNERS boundaries** — before pushing autonomously, check whether the fix touches files OUTSIDE this PR's existing diff or in a different CODEOWNERS team's area (the repo provides `bin/codeownership` — see the target repo's AGENTS.md "Social boundary: CODEOWNERS"). If so, do NOT auto-push: record `paused` and surface it to the human. Cross-team edits need human/owner buy-in.
 - **Local pass ≠ CI pass** — some tools (notably `codeownership`) behave differently on macOS vs Linux. When local verification passes but CI fails, treat CI as the source of truth and reproduce in Docker.
 - **One fix at a time** when possible — easier to identify what worked
 - **Progress is tracked across ticks** by the orchestrator via `scripts/pr-state.mjs` state and the tick report — the fixer itself does not keep a multi-day log.
