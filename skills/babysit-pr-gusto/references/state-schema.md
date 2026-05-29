@@ -1,7 +1,7 @@
 # Per-PR Babysit State
 
 One JSON file per PR at `<target-repo>/tmp/babysit/<pr>.json`. `tmp/` is gitignored
-in the web repo, so state is local and never committed. Managed only via `pr-state.js`.
+in the web repo, so state is local and never committed. Managed only via `pr-state.mjs`.
 
 ```json
 {
@@ -23,5 +23,6 @@ in the web repo, so state is local and never committed. Managed only via `pr-sta
 - **escalated**: when `true`, the orchestrator skips this PR and surfaces it to the
   human. Set automatically after `ESCALATE_AFTER` (default 3) non-green attempts, or
   manually by a fixer that hit a "can't verify locally" wall (never push a guess).
+- **lastBuild**: the raw build identifier or URL passed to the most recent `attempt` (caller's choice).
 - **attempts[].outcome**: `green` | `failed` | `paused` (`paused` = fixer stopped to
   ask the human; counts toward escalation only if not resolved).
