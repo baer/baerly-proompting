@@ -42,6 +42,10 @@ returns to the orchestrator. It does NOT loop waiting for the next build — the
 tick handles that. The steps below are that one iteration. The fixer is already
 `cd`'d into `.worktrees/<branch>`, so a bare `git push` updates the correct PR.
 
+(Steps are numbered from 2 for continuity with the original single-PR skill. "Step 1"
+is implicit: the orchestrator has already handed you the PR number, branch, worktree
+path, build, and prior attempts.)
+
 ## Step 2: Capture Initial State
 
 Record the starting point:

@@ -12,8 +12,12 @@ in the web repo, so state is local and never committed. Managed only via `pr-sta
   "lastBuild": "https://buildkite.com/gusto/web/builds/121885",
   "escalated": false,
   "attempts": [
-    { "build": "121885", "outcome": "failed", "note": "jest snapshot drift in apps/mcp" },
-    { "build": "121990", "outcome": "failed", "note": "same failure; fix didn't take" }
+    { "build": "121885", "outcome": "pushed", "note": "regenerated jest snapshots in apps/mcp" },
+    {
+      "build": "121990",
+      "outcome": "paused",
+      "note": "second failure differs; can't verify locally"
+    }
   ]
 }
 ```
@@ -24,5 +28,4 @@ in the web repo, so state is local and never committed. Managed only via `pr-sta
   human. Set automatically after `ESCALATE_AFTER` (default 3) non-green attempts, or
   manually by a fixer that hit a "can't verify locally" wall (never push a guess).
 - **lastBuild**: the raw build identifier or URL passed to the most recent `attempt` (caller's choice).
-- **attempts[].outcome**: `green` | `failed` | `paused` (`paused` = fixer stopped to
-  ask the human; counts toward escalation only if not resolved).
+- **attempts[].outcome**: `pushed` | `paused`. The fixer records `pushed` when it pushed a fix it can stand behind, `paused` when it could not verify a fix locally (never push a guess). Both are non-green and count toward escalation; a green result is recorded separately via `set <pr> status green`, not as an attempt.

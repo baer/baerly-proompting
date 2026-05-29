@@ -51,3 +51,10 @@ build — the next tick picks that up. This keeps each subagent short and bounde
 - Each PR has its own worktree, so parallel fixers never touch shared files. Safe to fan out.
 - Cap concurrency at the number of failing PRs (realistically ≤ a handful).
 - One new build per PR per tick is the max useful work — the build is the bottleneck.
+
+## Termination
+
+A tick with no failing, non-escalated PRs is **terminal**: emit the final summary and
+do NOT schedule another. Under `/loop`, omit the next wake-up; under `/schedule`, the
+routine can be disabled or left to no-op. Escalated PRs do not keep the loop alive —
+they are handed to the human, not retried.

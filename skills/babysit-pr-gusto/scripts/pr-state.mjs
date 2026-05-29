@@ -23,9 +23,14 @@ if (!cmd || !pr) {
   process.exit(1);
 }
 
+// Resolve the MAIN repo root, not the current worktree. Inside a linked worktree
+// `--show-toplevel` returns the worktree dir (state would scatter per-worktree);
+// `--git-common-dir` points at the main repo's .git from any worktree, so its
+// parent is the shared root where the orchestrator and all fixers agree.
 let root;
 try {
-  root = execSync('git rev-parse --show-toplevel').toString().trim();
+  const commonDir = execSync('git rev-parse --git-common-dir').toString().trim();
+  root = path.dirname(path.resolve(commonDir));
 } catch {
   console.error('pr-state: must be run from within a git repository');
   process.exit(1);

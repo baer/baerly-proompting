@@ -21,6 +21,6 @@ gh pr list --author "@me" --state open --limit 200 \
   --jq '.[]
         | select(.statusCheckRollup != null)
         | select([.statusCheckRollup[]
-            | select(.state=="FAILURE" or .conclusion=="FAILURE")] | length > 0)
+            | select(.state=="FAILURE" or .conclusion=="FAILURE" or .conclusion=="ERROR")] | length > 0)
         | .number' \
   || { echo "resolve-prs: gh pr list failed" >&2; exit 1; }

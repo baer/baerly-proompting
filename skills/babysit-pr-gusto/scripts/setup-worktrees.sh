@@ -41,6 +41,10 @@ for pr in "$@"; do
     echo "         Switch this dir to main first:  git switch main"
     continue
   fi
+  if git worktree list --porcelain | grep -qxF "branch refs/heads/$branch"; then
+    echo "BLOCKED: branch '$branch' (PR #$pr) is already checked out in another worktree; skipping."
+    continue
+  fi
 
   git fetch origin "$branch" >/dev/null 2>&1 || true
   git worktree add -- "$path" "$branch"
