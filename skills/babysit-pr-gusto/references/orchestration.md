@@ -43,7 +43,10 @@ The subagent is given: `pr`, `branch`, absolute worktree path, and the current
 `pr-state.mjs get <pr>` JSON (so it knows what's already been tried). It returns
 exactly one of three outcomes: **`pushed`** (forward fix), **`retriggered`** (CI
 re-kicked for a non-PR failure), or **`paused`** (could not act safely; handed to
-human). It must:
+human). **Return tersely:** reply to the orchestrator with just the outcome, the
+build ref, and a one-line note — push all detail (root cause, diff rationale,
+hypothesis) into the `pr-state.mjs` note and the commit message, NOT into the return
+value, which lands in the orchestrator's long-lived context. It must:
 
 1. `cd` into the worktree. **Ensure a clean worktree (ACTION, not assumption):** run
    `git status --short`. In autonomous mode there should be NO leftover uncommitted
@@ -68,6 +71,13 @@ human). It must:
    itself will clear). Then investigate the latest failed build
    (`bktide snapshot <failed-check-link>`). Read prior `attempts` to avoid repeating a
    fix that already failed.
+   **Read logs cheaply (protect your own context — CI logs are huge).** Start from the
+   snapshot's `manifest.json` to find the failing step + exit code, then **grep** that
+   step's `log.txt` for the error region (e.g.
+   `grep -nE 'FAIL|Error:|✗|error TS[0-9]|exit (code )?[1-9]'`) and read only a ~±40-line
+   window around the hit (errors cluster near the end of a failed step — `tail` works
+   too). NEVER read an entire CI log into context; bktide saves logs to files precisely
+   so you grep them instead of streaming them whole.
 5. **Non-PR failure? Retrigger instead of editing code.** If the failure is NOT caused
    by this PR — a flaky test that passes on rerun, or a CI infra flake (spot-instance
    termination, SIGTERM / exit 143, "agent lost", a BROKEN cascade from another job) —

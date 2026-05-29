@@ -110,6 +110,8 @@ Triage (`scripts/triage-prs.sh`) already gave you the failing check names in the
 
 Use the [investigating-builds](investigating-builds/SKILL.md) skill to investigate. The skill's tool hierarchy applies: `bktide snapshot` first, then other bktide commands, then MCP tools as fallback.
 
+**Read logs cheaply — CI logs are huge and will blow your context.** From the snapshot, read `manifest.json` to find the failing step + exit code, then **grep** that step's `log.txt` for the error region (e.g. `grep -nE 'FAIL|Error:|✗|error TS[0-9]|exit (code )?[1-9]'`) and read only a small window around the hit (errors cluster near the end of a failed step). Never `Read`/`cat` a whole CI log into context — bktide writes logs to files so you grep them.
+
 After gathering build data, identify failure patterns:
 
 - Test failures (RSpec, Jest, pytest, etc.)
@@ -227,6 +229,8 @@ fixer's. Do not loop here waiting for a new build. Instead:
 - If the failure was NOT caused by this PR — a flaky test that passes on rerun, or a CI infra flake (spot-instance termination, SIGTERM / exit 143, "agent lost", BROKEN cascade) — do NOT edit code. Retrigger CI with an empty commit (`git commit --allow-empty -m "ci: retrigger build (<reason>)"` then `git push`), record `scripts/pr-state.mjs attempt <pr> <build> retriggered "<reason>"`, and return `retriggered`. (Cap: `pr-state.mjs` auto-escalates after 2 retriggers — a 3rd "flake" recurrence is probably real and needs a human.)
 - If you could not verify a fix locally (never push a guess), or the fix touches another team's CODEOWNERS area, or the worktree is too stale to install/verify: **leave the worktree CLEAN** for the next tick — revert or stash your unverified edits (`git checkout -- .` or `git stash`) — then `scripts/pr-state.mjs attempt <pr> <build> paused "<hypothesis>"` and return `paused`.
 - The next tick re-triages and, if still failing and not escalated, dispatches a fresh fixer.
+
+**Return tersely.** Your reply to the orchestrator is just the outcome (`pushed`/`retriggered`/`paused`), the build ref, and a one-line note. All detail — root cause, diff rationale, hypothesis — goes into the `pr-state.mjs` note and the commit message, never into the return value (it lands in the orchestrator's long-lived context).
 
 ## Final summary (orchestrator, after all ticks)
 
