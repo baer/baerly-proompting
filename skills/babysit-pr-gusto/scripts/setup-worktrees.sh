@@ -49,7 +49,7 @@ for pr in "$@"; do
   git fetch origin "$branch" >/dev/null 2>&1 || true
   git worktree add -- "$path" "$branch"
   echo "created: $path (PR #$pr)"
-  ( cd "$path" && yarn install --silent ) || echo "warn: yarn install failed in $path"
+  ( cd "$path" && yarn install --silent ) || echo "ESCALATE: yarn install failed in $path — branch may be too stale to verify locally (check .yarnrc.yml / merge main)"
 done
 
 echo "--- worktrees ---"
