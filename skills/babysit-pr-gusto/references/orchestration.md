@@ -9,14 +9,21 @@ A **tick** is one pass over every babysat PR. It is stateless except for the
 2. `setup-worktrees.sh $prs` — ensure each has a `.worktrees/<branch>` workspace.
    If any PR is `BLOCKED` (its branch is checked out in the main dir), report it
    and drop it from this tick.
-3. `triage-prs.sh $prs` — classify each PR.
+3. `triage-prs.sh $prs` — classify each PR. Triage IGNORES manual-review-only checks
+   (Chromatic "UI Tests"/"UI Review" — visual-diff approval a human must do, which the
+   babysitter can neither fix nor wait on; configurable via `BABYSIT_IGNORE_CHECKS`).
+   A PR green on every non-ignored check triages `green` even while Chromatic is still
+   pending; those pending manual gates come back in each PR's `ignored` array.
 4. For each PR, update `pr-state.mjs set <pr> status <state>`.
 5. Partition:
    - **green** → already recorded by `pr-state.mjs set <pr> status green` in step 4;
      announce it's done; **free its disk with `remove-worktree.sh <pr>`** — this deletes
      the worktree (node_modules, snapshots, build output) but KEEPS the branch ref and
      the `tmp/babysit/<pr>.json` record; then stop babysitting it. If it ever regresses,
-     step 2's `setup-worktrees.sh` re-provisions the worktree on demand.
+     step 2's `setup-worktrees.sh` re-provisions the worktree on demand. If the PR's
+     `ignored` array is non-empty (e.g. a pending Chromatic visual review), report those
+     as "manual review pending (human)" — the PR is babysitter-done but still needs a
+     human to approve them and merge.
    - **running** → skip this tick (nothing to do until the build completes).
    - **unknown** → report; do not act (no checks found — likely a draft or a stuck PR).
    - **escalated** (`escalated: true`, including a fixer that escalated this tick) →
