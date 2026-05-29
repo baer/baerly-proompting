@@ -12,7 +12,7 @@ A **tick** is one pass over every babysat PR. It is stateless except for the
 3. `triage-prs.sh $prs` — classify each PR.
 4. For each PR, update `pr-state.mjs set <pr> status <state>`.
 5. Partition:
-   - **green** → `pr-state.mjs attempt <pr> "" green "ci green"`; announce it's done; stop babysitting it.
+   - **green** → already recorded by `pr-state.mjs set <pr> status green` in step 4; announce it's done; stop babysitting it.
    - **running** → skip this tick (nothing to do until the build completes).
    - **unknown** → report; do not act (no checks found — likely a draft or a stuck PR).
    - **failed AND not escalated** → eligible for a fixer.
