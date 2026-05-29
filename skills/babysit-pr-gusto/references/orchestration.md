@@ -24,11 +24,18 @@ A **tick** is one pass over every babysat PR. It is stateless except for the
      every tick. (An operator may explicitly remove it; the default is keep-and-report,
      never silently drop it.)
    - **failed AND not escalated** → eligible for a fixer.
-6. **Fan out**: dispatch ONE subagent per eligible PR, in parallel (Agent tool;
+6. **Scope check (before fixing).** For each fixer-eligible PR, run
+   `scope-check.sh <pr>` and put its verdict in the tick report. On a `REVIEW`
+   verdict — the diff sprawls beyond the project dirs the PR names, especially when
+   a narrowing word like "pilot"/"only" is present — surface it prominently and
+   prefer to pause for a human glance rather than spend more CI cycles greening a PR
+   whose scope is suspect. (The fixer itself must never widen that footprint — see
+   the gate's "never expand the diff" rule.)
+7. **Fan out**: dispatch ONE subagent per eligible PR, in parallel (Agent tool;
    see superpowers:dispatching-parallel-agents). Each subagent runs the
    single-iteration fixer contract below, scoped to that PR's worktree.
-7. Collect subagent results, persist via `pr-state.mjs attempt …`, and print the
-   tick report (table: PR | branch | state | iterations | strikes | escalated | note).
+8. Collect subagent results, persist via `pr-state.mjs attempt …`, and print the
+   tick report (table: PR | branch | state | scope | iterations | strikes | escalated | note).
 
 ## Single-iteration fixer contract (one subagent, one PR)
 
@@ -82,6 +89,13 @@ human). It must:
      area (the target repo provides `bin/codeownership` — see its AGENTS.md "Social
      boundary: CODEOWNERS"). If so, do NOT auto-push: cross-team edits need
      human/owner buy-in.
+   - **Never expand the diff (scope guard).** A fix may modify ONLY files already in
+     this PR's diff, or the file(s) immediately implicated by the failure. Never widen
+     the footprint to new project dirs, or mass-autofix many files to chase green (e.g.
+     a bulk lint autofix across a codebase that was never cleaned up — a 1-file rule
+     change must not become a 200-file diff). This is the same class of stop as "never
+     push a guess": if greening would require expanding scope, do NOT — pause and
+     surface for a human scope decision.
    - In any of these cases, leave the worktree CLEAN: revert or stash the unverified
      edits (`git checkout -- .` or `git stash`) so the next tick starts from a clean
      state, then `pr-state.mjs attempt <pr> <build> paused "<hypothesis / reason>"`

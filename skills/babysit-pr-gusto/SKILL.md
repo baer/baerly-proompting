@@ -32,9 +32,12 @@ For the tick algorithm and the per-PR single-iteration **fixer contract**, follo
 5. For each PR now **green**: `scripts/remove-worktree.sh <pr>` to free its disk
    (deletes the worktree, KEEPS the branch and the `tmp/babysit/<pr>.json` record),
    then drop it from the watch
-6. Fan out ONE fixer subagent per failing, non-escalated PR (parallel)
-7. Persist results (`scripts/pr-state.mjs attempt …`) and print the tick report
-8. If backgrounded and any PR is still failing/running and not escalated, the
+6. For each **failing, non-escalated** PR: `scripts/scope-check.sh <pr>` → put the
+   verdict in the report; on a `REVIEW` verdict (diff sprawls beyond the dirs the PR
+   names), surface it and prefer to pause for a human scope glance before greening
+7. Fan out ONE fixer subagent per failing, non-escalated PR (parallel)
+8. Persist results (`scripts/pr-state.mjs attempt …`) and print the tick report
+9. If backgrounded and any PR is still failing/running and not escalated, the
    cadence (Mode A/B in backgrounding.md) schedules the next tick.
 
 **Stop condition (owned by this skill, not the loop prompt).** A bare loop
@@ -343,6 +346,7 @@ git diff origin/main -- test/helpers/
 - **Always verify locally** before pushing — saves CI cycles
 - **Never push a guess** — every fix you push must be one you can explain with certainty, not a hypothesis. If you cannot reproduce the failure locally and cannot mechanically prove your change fixes it, **stop and ask the user**. Present your hypothesis clearly: what you think is wrong, what you'd change, and why you're not certain. Let the user decide whether to spend a CI cycle validating it. Pushing guesses wastes CI cycles (20+ minutes per build), pollutes git history, and erodes trust.
 - **Don't auto-push across CODEOWNERS boundaries** — before pushing autonomously, check whether the fix touches files OUTSIDE this PR's existing diff or in a different CODEOWNERS team's area (the repo provides `bin/codeownership` — see the target repo's AGENTS.md "Social boundary: CODEOWNERS"). If so, do NOT auto-push: record `paused` and surface it to the human. Cross-team edits need human/owner buy-in.
+- **Never expand the diff to chase green (scope guard)** — a fix may touch only files already in the PR's diff (or the file(s) the failure directly implicates). Never add new project dirs or mass-autofix to make CI pass (a 1-file rule change must not become a 200-file diff). Run `scripts/scope-check.sh <pr>` to flag a PR whose footprint already sprawls beyond what its title/description name (it cross-checks the PR title, body, and the diff, and is loudest when a narrowing word like "pilot"/"only" is present); if greening would require widening scope, pause and surface for a human scope decision.
 - **Local pass ≠ CI pass** — some tools (notably `codeownership`) behave differently on macOS vs Linux. When local verification passes but CI fails, treat CI as the source of truth and reproduce in Docker.
 - **One fix at a time** when possible — easier to identify what worked
 - **Progress is tracked across ticks** by the orchestrator via `scripts/pr-state.mjs` state and the tick report — the fixer itself does not keep a multi-day log.
