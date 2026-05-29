@@ -1,6 +1,6 @@
 ---
 name: babysit-pr-gusto
-description: Iterative CI babysitting loop for Gusto PRs — investigate Buildkite failures, apply fixes, verify locally, push, monitor, and repeat until green.
+description: Babysit one or more Gusto PRs to green. Provisions a git worktree per PR, triages required checks, dispatches a single-iteration fix loop (investigate → fix → verify → push) per failing PR, and can run backgrounded on a /loop or /schedule cadence until every PR passes or escalates. Single-PR is just N=1.
 ---
 
 # Babysit PR (Gusto)
@@ -11,29 +11,36 @@ This command orchestrates the debugging loop. For all Buildkite interaction (fet
 
 ## Arguments
 
-- **URL** (optional): Buildkite build URL to start investigating
-- If no URL provided, infer from current branch
+- **PR numbers** (zero or more): the PRs to babysit. With none, babysits every open
+  authored PR that currently has a failing check (`scripts/resolve-prs.sh`).
+- A Buildkite URL or single PR still works — that's the N=1 path.
 
-## Step 1: Determine the Build
+## How this skill runs
 
-### If URL provided:
+This is an **orchestrator**. One invocation = one **tick** across all target PRs.
+For the tick algorithm and the per-PR single-iteration **fixer contract**, follow
+`references/orchestration.md`. For running ticks on a cadence, follow
+`references/backgrounding.md`. For all Buildkite interaction, use the
+`investigating-builds/SKILL.md` sub-skill and its tool hierarchy.
 
-Use the [investigating-builds](investigating-builds/SKILL.md) skill's "Investigating a Build from URL" workflow — `bktide snapshot` parses any Buildkite URL automatically.
+### Tick (top level)
 
-### If no URL provided:
+1. `prs=$(scripts/resolve-prs.sh "$@")`
+2. `scripts/setup-worktrees.sh $prs` (drop any BLOCKED PR; report it)
+3. `scripts/triage-prs.sh $prs` → per-PR state
+4. Persist each via `scripts/pr-state.mjs set <pr> status <state>`
+5. Fan out ONE fixer subagent per failing, non-escalated PR (parallel)
+6. Persist results (`scripts/pr-state.mjs attempt …`) and print the tick report
+7. If backgrounded and any PR is still failing/running and not escalated, the
+   cadence (Mode A/B in backgrounding.md) schedules the next tick. Stop when all
+   PRs are green or escalated, with a final summary.
 
-1. Get the current git branch:
-   ```bash
-   git branch --show-current
-   ```
+## Fixer sub-procedure (one PR, one iteration)
 
-2. Identify the pipeline:
-   - Repository name often matches pipeline slug
-   - Check `.buildkite/pipeline.yml` for pipeline hints
-
-3. Use the [investigating-builds](investigating-builds/SKILL.md) skill's "Checking Current Branch/PR Status" workflow to find the latest build for this branch.
-
-4. If no pipeline can be determined, ask the user for the Buildkite URL.
+A fixer runs inside a single PR's worktree and does exactly ONE iteration, then
+returns to the orchestrator. It does NOT loop waiting for the next build — the next
+tick handles that. The steps below are that one iteration. The fixer is already
+`cd`'d into `.worktrees/<branch>`, so a bare `git push` updates the correct PR.
 
 ## Step 2: Capture Initial State
 
@@ -70,6 +77,7 @@ If yes, create `docs/plans/ci-fix-<branch-slug>.md`:
 ## Session: <YYYY-MM-DD>
 
 ### Initial State
+
 - Branch: `<branch-name>`
 - PR: #<pr-number>
 - Latest failing build: <build-number> (<N> failures - <brief description>)
@@ -99,9 +107,9 @@ If yes, create `docs/plans/ci-fix-<branch-slug>.md`:
 
 ## Summary of Issues Fixed
 
-| Build | Issue | Root Cause | Fix |
-|-------|-------|------------|-----|
-| <num> | <issue> | <cause> | <fix> |
+| Build | Issue   | Root Cause | Fix   |
+| ----- | ------- | ---------- | ----- |
+| <num> | <issue> | <cause>    | <fix> |
 
 ## Next Steps
 
@@ -113,12 +121,14 @@ If yes, create `docs/plans/ci-fix-<branch-slug>.md`:
 **IMPORTANT**: Before diving into failures, check if the branch is up to date with main.
 
 1. Check if branch is behind main:
+
    ```bash
    git fetch origin main
    git rev-list --count HEAD..origin/main
    ```
 
 2. If behind by more than 0 commits:
+
    > "Your branch is <N> commits behind main. Recommend merging main first to rule out stale code issues."
 
    Ask user if they want to:
@@ -131,6 +141,7 @@ If yes, create `docs/plans/ci-fix-<branch-slug>.md`:
 Use the [investigating-builds](investigating-builds/SKILL.md) skill to investigate. The skill's tool hierarchy applies: `bktide snapshot` first, then other bktide commands, then MCP tools as fallback.
 
 After gathering build data, identify failure patterns:
+
 - Test failures (RSpec, Jest, pytest, etc.)
 - Build/compilation errors
 - Linting/type checking errors
@@ -141,6 +152,7 @@ After gathering build data, identify failure patterns:
 **CRITICAL**: Do not categorize any failure as "pre-existing," "unrelated to this branch," or "not blocking" without concrete evidence. Every failure in a required check is your problem to solve until proven otherwise.
 
 To prove a failure is pre-existing, you must do **at least one** of:
+
 - Show the same test/lint failure exists on the latest `main` build of the **same pipeline**
 - Show with `git log` / `git diff origin/main` that the failing file was not modified on this branch AND the failure reproduces on main
 - Show the failure is in a Trunk.io quarantined test (the CI log will say "quarantined")
@@ -153,19 +165,20 @@ Even when a failure IS provably pre-existing, tell the user clearly: "This failu
 
 Group failures by type and plan the fix approach:
 
-| Category | Signs | Verification Required | Typical Fix |
-|----------|-------|----------------------|-------------|
-| **Stale branch** | Tests pass on main | **Must verify**: check same pipeline on main | Merge main, resolve conflicts |
-| **Gemfile.lock issues** | Checksum errors, missing gems | Visible in logs | Regenerate from main |
-| **Test failures** | RSpec/Jest failures with stack traces | Run locally first | Fix the test or code |
-| **Type errors** | Sorbet/TypeScript errors | Run type checker locally | Fix type annotations |
-| **Lint errors** | Rubocop/ESLint failures | Run linter locally | Auto-fix or manual fix |
-| **Flaky tests** | In Trunk quarantine, or passes locally multiple times | Check Trunk.io links in CI output | May need retry or quarantine |
-| **CODEOWNERS out of date** | `bin/codeownership validate` fails in CI | **Cannot trust local validate** — see Common Fix Patterns | Regenerate in Docker or diff against main |
+| Category                   | Signs                                                 | Verification Required                                     | Typical Fix                               |
+| -------------------------- | ----------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------- |
+| **Stale branch**           | Tests pass on main                                    | **Must verify**: check same pipeline on main              | Merge main, resolve conflicts             |
+| **Gemfile.lock issues**    | Checksum errors, missing gems                         | Visible in logs                                           | Regenerate from main                      |
+| **Test failures**          | RSpec/Jest failures with stack traces                 | Run locally first                                         | Fix the test or code                      |
+| **Type errors**            | Sorbet/TypeScript errors                              | Run type checker locally                                  | Fix type annotations                      |
+| **Lint errors**            | Rubocop/ESLint failures                               | Run linter locally                                        | Auto-fix or manual fix                    |
+| **Flaky tests**            | In Trunk quarantine, or passes locally multiple times | Check Trunk.io links in CI output                         | May need retry or quarantine              |
+| **CODEOWNERS out of date** | `bin/codeownership validate` fails in CI              | **Cannot trust local validate** — see Common Fix Patterns | Regenerate in Docker or diff against main |
 
 **Important**: "Stale branch" is only valid if you have actually verified the test passes on the latest main build of the same pipeline. Do not guess — check.
 
 For each failure category, outline:
+
 1. What needs to be fixed
 2. Files likely involved
 3. How to verify locally before pushing
@@ -175,6 +188,7 @@ For each failure category, outline:
 **Before pushing any fix**, verify locally:
 
 ### For Ruby/Rails projects:
+
 ```bash
 bin/rspec <spec_files>
 bin/srb tc <modified_files>      # if using Sorbet
@@ -182,6 +196,7 @@ lefthook run pre-commit          # or: pre-commit run --files <modified_files>
 ```
 
 ### For JavaScript/TypeScript projects:
+
 ```bash
 npm test -- <test_files>         # or: yarn test <test_files>
 npx tsc --noEmit                 # if using TypeScript
@@ -189,6 +204,7 @@ npm run lint
 ```
 
 ### General:
+
 ```bash
 # Run whatever CI runs locally if possible
 # Check the failed job's command in the logs
@@ -197,6 +213,7 @@ npm run lint
 ### When local verification diverges from CI
 
 Some tools produce different results on macOS (local) vs Linux (CI Docker). Known examples:
+
 - `bin/codeownership` (Rust binary via dotslash — macOS and Linux builds can disagree on generated output)
 - Tools with platform-specific file globbing or sorting behavior
 
@@ -216,13 +233,15 @@ Some tools produce different results on macOS (local) vs Linux (CI Docker). Know
 After local verification passes:
 
 1. **Commit the fix** with a descriptive message referencing the build:
+
    ```
    Fix <failure type> from build #<number>
 
    <brief description of what was wrong and how it was fixed>
    ```
 
-2. **Push the changes**:
+2. **Push the changes** (the fixer is already on `<branch>` in its worktree — a bare push is correct):
+
    ```bash
    git push
    ```
@@ -231,26 +250,16 @@ After local verification passes:
 
 4. **Report status** when build completes:
    - If passed: Summarize what was fixed
-   - If failed: Go to Step 8
+   - If still failing: Go to Step 8 (Record this attempt and return)
 
-## Step 8: Iterate if Still Failing
+## Step 8: Record this attempt and return
 
-If the new build still has failures:
+Iteration across builds is the orchestrator's job (one fix per tick), not the
+fixer's. Do not loop here waiting for a new build. Instead:
 
-1. **Compare with previous build**:
-   - Same failures? Fix didn't work
-   - Different failures? Progress, but new issues
-   - Fewer failures? Partial progress
-
-2. **Document the iteration**:
-   > "Build #<new> still failing with <N> failures (was <M>). <same/different> failure pattern."
-
-3. **Return to Step 4** with the new build number
-
-4. **Track iterations** — after 3+ iterations, consider:
-   - Is there a deeper architectural issue?
-   - Should we get another pair of eyes?
-   - Is the branch too diverged from main?
+- If you pushed a fix you can stand behind: `scripts/pr-state.mjs attempt <pr> <build> pushed "<one-line summary>"` and return `pushed`.
+- If you could not verify a fix locally (never push a guess): `scripts/pr-state.mjs attempt <pr> <build> paused "<hypothesis>"` and return `paused`.
+- The next tick re-triages and, if still failing and not escalated, dispatches a fresh fixer.
 
 ## Step 9: Session Summary
 
@@ -265,13 +274,16 @@ When CI finally passes (or session ends), summarize:
 **Iterations:** <count>
 
 ### Fixes Applied
+
 1. <Fix 1 description>
 2. <Fix 2 description>
 
 ### Patterns Encountered
+
 - <Pattern 1 and how it was resolved>
 
 ### Lessons Learned
+
 - <Any insights for future debugging>
 ```
 
@@ -317,6 +329,7 @@ git commit -m "Regenerate CODEOWNERS in Docker for Linux parity"
 **Symptom:** `Your lockfile has an empty CHECKSUMS entry for "<gem>"`
 
 **Fix:**
+
 ```bash
 rm Gemfile.lock
 git checkout origin/main -- Gemfile.lock
@@ -329,6 +342,7 @@ git commit -m "Regenerate Gemfile.lock with proper checksums"
 ### Merge Conflicts Blocking Push
 
 **Fix:**
+
 ```bash
 git stash push -m "WIP changes"
 git fetch origin main
@@ -343,6 +357,7 @@ git stash pop
 ### Test Matcher/Helper Changes Breaking Tests
 
 **Diagnosis:** Compare with main to see what changed:
+
 ```bash
 git diff origin/main -- spec/support/
 git diff origin/main -- test/helpers/
@@ -366,3 +381,4 @@ git diff origin/main -- test/helpers/
 - **Document as you go** — helps if session spans multiple days
 - **Know when to stop** — sometimes fresh eyes or a different approach is needed
 - **Check main first** — the issue might already be fixed there, but verify by checking the actual pipeline, not by assuming
+- **Never auto-merge.** This repo uses the Trunk.io merge queue. Babysitting stops at green and hands back to the human; never comment `/trunk merge` unless explicitly asked.
