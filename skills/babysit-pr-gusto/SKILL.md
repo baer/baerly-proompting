@@ -29,9 +29,12 @@ For the tick algorithm and the per-PR single-iteration **fixer contract**, follo
 2. `scripts/setup-worktrees.sh $prs` (drop any BLOCKED PR; report it)
 3. `scripts/triage-prs.sh $prs` → per-PR state
 4. Persist each via `scripts/pr-state.mjs set <pr> status <state>`
-5. Fan out ONE fixer subagent per failing, non-escalated PR (parallel)
-6. Persist results (`scripts/pr-state.mjs attempt …`) and print the tick report
-7. If backgrounded and any PR is still failing/running and not escalated, the
+5. For each PR now **green**: `scripts/remove-worktree.sh <pr>` to free its disk
+   (deletes the worktree, KEEPS the branch and the `tmp/babysit/<pr>.json` record),
+   then drop it from the watch
+6. Fan out ONE fixer subagent per failing, non-escalated PR (parallel)
+7. Persist results (`scripts/pr-state.mjs attempt …`) and print the tick report
+8. If backgrounded and any PR is still failing/running and not escalated, the
    cadence (Mode A/B in backgrounding.md) schedules the next tick.
 
 **Stop condition (owned by this skill, not the loop prompt).** A bare loop
