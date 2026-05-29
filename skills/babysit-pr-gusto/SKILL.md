@@ -61,64 +61,13 @@ Record the starting point:
 
 Announce to the user:
 
-> "Starting CI fix session for branch `<branch>` (Build #<number>). I see <N> failed jobs. Let me investigate."
+> "Investigating CI failure on `<branch>` (Build #<number>) — <N> failed job(s)."
 
-### Optional: Create Tracking Document
-
-For complex or multi-day debugging sessions, offer to create a tracking document:
-
-> "Would you like me to create a tracking document for this CI fix session? Useful for multi-day debugging or handoff."
-
-If yes, create `docs/plans/ci-fix-<branch-slug>.md`:
-
-```markdown
-# CI Fix Workflow: <branch-name>
-
-## Session: <YYYY-MM-DD>
-
-### Initial State
-
-- Branch: `<branch-name>`
-- PR: #<pr-number>
-- Latest failing build: <build-number> (<N> failures - <brief description>)
-
----
-
-## Iteration 1: <Title>
-
-**Build:** <number> (<status>)
-**Failures:** <count> (<pattern description>)
-
-**Root cause:**
-<1-2 sentences explaining why this failed>
-
-**Fix:**
-<Code changes or commands>
-
-**Verification:**
-\`\`\`bash
-<local verification commands>
-\`\`\`
-
-**Commit:** `<sha>` - "<message>"
-**Next build:** <number>
-
----
-
-## Summary of Issues Fixed
-
-| Build | Issue   | Root Cause | Fix   |
-| ----- | ------- | ---------- | ----- |
-| <num> | <issue> | <cause>    | <fix> |
-
-## Next Steps
-
-- [ ] <remaining items if session ends before green>
-```
+Machine-readable per-PR state is maintained by the orchestrator via `scripts/pr-state.mjs` (see `references/state-schema.md`); the fixer does not keep its own tracking document.
 
 ## Step 3: Check Branch Freshness
 
-**IMPORTANT**: Before diving into failures, check if the branch is up to date with main.
+**IMPORTANT**: Before diving into failures, check if the branch is up to date with main. (If `scripts/setup-worktrees.sh` already fetched origin while provisioning the worktree, this is a freshness confirm rather than a first fetch.)
 
 1. Check if branch is behind main:
 
@@ -137,6 +86,8 @@ If yes, create `docs/plans/ci-fix-<branch-slug>.md`:
    - The failures might already be fixed in main
 
 ## Step 4: Investigate Failures
+
+Triage (`scripts/triage-prs.sh`) already gave you the failing check names in the PR state — Step 4 is about reading the _logs_ for those checks via `investigating-builds`, not re-triaging.
 
 Use the [investigating-builds](investigating-builds/SKILL.md) skill to investigate. The skill's tool hierarchy applies: `bktide snapshot` first, then other bktide commands, then MCP tools as fallback.
 
@@ -226,7 +177,7 @@ Some tools produce different results on macOS (local) vs Linux (CI Docker). Know
 3. **If Docker reproduction isn't feasible**, diff your branch's file against `origin/main` and restore the main version if your branch shouldn't be changing it. Then verify that the file isn't being re-modified by a pre-commit hook or generate step.
 4. **If you still can't reproduce or prove the fix**, tell the user. Present your best hypothesis — what you think is wrong, what you'd change, and why you can't verify it locally. Ask whether they want to spend a CI cycle testing it. Never push a hypothesis silently.
 
-## Step 7: Push and Monitor
+## Step 7: Push and hand off
 
 **Gate check before pushing:** Can you explain with certainty why your change fixes the CI failure? If not — if it's a hypothesis you'd like to test — **stop and ask the user first.** Describe what you think is wrong, what you'd change, and why you can't verify it locally. Get explicit confirmation before pushing.
 
@@ -246,11 +197,7 @@ After local verification passes:
    git push
    ```
 
-3. **Monitor the new build** using the [investigating-builds](investigating-builds/SKILL.md) skill's "Post-Push Monitoring" workflow.
-
-4. **Report status** when build completes:
-   - If passed: Summarize what was fixed
-   - If still failing: Go to Step 8 (Record this attempt and return)
+3. After pushing, confirm the new build has been enqueued/started (a quick check via `investigating-builds`), then proceed to Step 8 and return. Do NOT wait for the new build to finish — the next orchestrator tick re-triages it.
 
 ## Step 8: Record this attempt and return
 
@@ -261,9 +208,11 @@ fixer's. Do not loop here waiting for a new build. Instead:
 - If you could not verify a fix locally (never push a guess): `scripts/pr-state.mjs attempt <pr> <build> paused "<hypothesis>"` and return `paused`.
 - The next tick re-triages and, if still failing and not escalated, dispatches a fresh fixer.
 
-## Step 9: Session Summary
+## Final summary (orchestrator, after all ticks)
 
-When CI finally passes (or session ends), summarize:
+> Emitted by the orchestrator once every PR is green or escalated — NOT by the fixer (which returns after one iteration per Step 8). This complements the per-tick report defined in `references/orchestration.md`.
+
+When CI finally passes (or all PRs are resolved), summarize:
 
 ```markdown
 ## CI Fix Session Summary
@@ -378,7 +327,7 @@ git diff origin/main -- test/helpers/
 - **Never push a guess** — every fix you push must be one you can explain with certainty, not a hypothesis. If you cannot reproduce the failure locally and cannot mechanically prove your change fixes it, **stop and ask the user**. Present your hypothesis clearly: what you think is wrong, what you'd change, and why you're not certain. Let the user decide whether to spend a CI cycle validating it. Pushing guesses wastes CI cycles (10+ minutes per build), pollutes git history, and erodes trust.
 - **Local pass ≠ CI pass** — some tools (notably `codeownership`) behave differently on macOS vs Linux. When local verification passes but CI fails, treat CI as the source of truth and reproduce in Docker.
 - **One fix at a time** when possible — easier to identify what worked
-- **Document as you go** — helps if session spans multiple days
+- **Progress is tracked across ticks** by the orchestrator via `scripts/pr-state.mjs` state and the tick report — the fixer itself does not keep a multi-day log.
 - **Know when to stop** — sometimes fresh eyes or a different approach is needed
 - **Check main first** — the issue might already be fixed there, but verify by checking the actual pipeline, not by assuming
 - **Never auto-merge.** This repo uses the Trunk.io merge queue. Babysitting stops at green and hands back to the human; never comment `/trunk merge` unless explicitly asked.
